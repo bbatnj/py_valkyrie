@@ -345,7 +345,37 @@ def calc_current_yield(df, dvd_freq, dvd_path='d:/valkyrie/data/universe/dvd/res
     print(df_dvd_err)
 
   return df_merged
+from numba import jit
+import numpy as np
 
+@jit
+def calc_ts_ema(x, dt, halflife_in_s):
+    eta = np.exp(-1.0 * dt / halflife_in_s)
+    eta = np.clip(eta, 0, np.inf)
+    ome = 1.0 - eta
+    n, y = x.shape[0], x.copy()
+
+    for i in np.arange(1, n):
+        if not np.isfinite(x[i]):
+            y[i] = y[i - 1]
+            continue
+
+        y[i] = y[i - 1] * eta[i] + ome[i] * x[i]
+    return y
+
+@jit
+def calc_ts_ems(x, dt, halflife_in_s):
+    eta = np.exp(-1.0 * dt / halflife_in_s)
+    eta = np.clip(eta, 0, np.inf)
+    n, y = x.shape[0], x.copy()
+
+    for i in np.arange(1, n):
+        if not np.isfinite(x[i]):
+            y[i] = y[i - 1]
+            continue
+
+        y[i] = y[i - 1] * eta[i] + x[i]
+    return y
 
 
 # class DataMgrCYieldEma(DataMgr):

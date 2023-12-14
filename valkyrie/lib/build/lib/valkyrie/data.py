@@ -9,7 +9,6 @@ from pathlib import Path
 from valkyrie.tools import ymd_dir, ymd
 from valkyrie.securities import stocks_good_dvd, ROOT_PATH, nyse
 
-
 def resample_bid_ask(date, stocks, data_path, freq='30s',
                      stime='09:30:00', etime="16:00:00",
                      verbose=False):

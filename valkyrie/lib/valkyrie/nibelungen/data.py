@@ -1,8 +1,6 @@
-data_root_dir = '/home/bb/data/BDM'
-instr = 'BDM.BTC.USDT.FP'
-date = '2023-11-01'
-
 import os
+import copy
+from itertools import product as cartesian_product
 
 import pandas as pd
 import numpy as np
@@ -11,6 +9,9 @@ import torch
 from numba import jit
 
 from valkyrie.quants.utils import add_fwd_ret_by_n_, toDf32_
+
+
+data_root_dir = '/home/bb/data/BDM'
 
 def resample_bdm_trade_tob(date, instr, freq):
 
@@ -62,8 +63,9 @@ def save_sampled_df(date, freq, data_root_dir, instr):
     df_res = resample_bdm_trade_tob(date, instr, freq)
     dst_dir = f'{data_root_dir}/{instr}/sampled/{freq}/{date}'
     os.system(f'mkdir -p {dst_dir}')
-    df_res.to_parquet(f'{dst_dir}/df_trd_tob_freq_{freq}.parquet', compression='gzip')
-    print(f'saved sampled df for {date}')
+    dist_file = f'{dst_dir}/df_trd_tob_freq_{freq}.parquet'
+    df_res.to_parquet(dist_file, compression='gzip')
+    print(f'saved sampled df as {dist_file}')
 
 
 def read_sampled_df(sdate, edate, freq, data_root_dir, instr):
@@ -79,7 +81,6 @@ def read_sampled_df(sdate, edate, freq, data_root_dir, instr):
     # for c in cols.split():
     #     origin_c = c.replace('buy_px', 'apx').replace('sell_px', 'bpx')
     #     df_res[c].fillna(df_res[origin_c], inplace=True)
-
 
     df_res['bpx_last'].ffill(inplace=True)
     df_res['apx_last'].ffill(inplace=True)
@@ -132,107 +133,42 @@ class DataMgr:
     def get(self, instr):
         return self.instr2df[instr]
 
-
-import torch
-from torch.utils.data import Dataset, DataLoader
-
-
-class Df2T2(Dataset):
-    def __init__(self, df: pd.DataFrame, M, xcols, ycol, wcol=None, mul=2, dtype=torch.float32, device='cpu', yscaler = 1e4):
-        super().__init__()
-
-        self.M = M
-        self.W = M
-        self.n_features = len(xcols)
-
-        final_x_cols = xcols.copy()  # we do not wanna change xcols
-
-        dfs = [df[xcols]]
-        for freq_mul_index in np.arange(1, self.M):
-            freq_mul = mul ** freq_mul_index
-            df_temp = df[xcols].rolling(freq_mul).agg('mean')
-            df_temp.columns = [f'{c}_x{freq_mul:04d}' for c in xcols]
-            dfs.append(df_temp)
-            final_x_cols += list(df_temp.columns)
-
-        # xcols must be sorted by feature then freq_mul
-        final_x_cols = sorted(final_x_cols)
-
-        dfs.append(df[[ycol]])  # y
-        self.df = pd.concat(dfs, axis=1)  # x's
-
-        prev_n = self.df.shape[0]
-        self.df.dropna(inplace=True)
-
-        n = self.df.shape[0]
-        print(f'after dropping na {prev_n} -> {n}')
-
-        weights = np.ones(n)
-        if wcol:  # w
-            weights = df[wcol].values
-
-        weights = weights / np.sqrt(np.mean(weights * weights))
-
-        X = torch.tensor(self.df[final_x_cols].values, dtype=dtype, device=device)
-        # xcols must be sorted by feature then freq_mul
-        X = X.T.view(self.n_features, self.M, self.df.shape[0]).contiguous()
-        self.X = X
-        # X.shape is now (n_features, M, n_samples)
-
-        self.offset = self.W - 1
-        self.yw = torch.tensor(np.c_[yscaler * self.df[ycol].values, weights], dtype=dtype, device=device)
-        self.n = self.X.shape[-1] - self.W + 1
-
-    def __len__(self):
-        return self.n
-
-    def __getitem__(self, idx):
-        return self.X[:,:,idx: idx+self.offset+1], self.yw[idx+self.offset]
-
-    @jit
-    def get_yw(self):
-        n = self.n
-        c = np.prod(self[0][0].shape)
-        #X_sk = np.empty((n, c))
-        y_sk = np.empty(n)
-        w_sk = np.empty(n)
-        for i in np.arange(n):
-            z = self[i]
-            #X_sk[i, :] = z[0].reshape(-1)
-            y_sk[i] = z[1][0]
-            w_sk[i] = z[1][1]
-        return y_sk, w_sk
-
 if __name__ == "__main__":
     from concurrent.futures import ProcessPoolExecutor
     from functools import partial
-    sdate, edate = '2023-01-01', '2023-01-31'
-    instr = 'BDM.BTC.USDT.FP'
-    freq = '1s'
+    sdate, edate = '2023-01-01', '2023-11-30'
+    instrs = ['BDM.BTC.USDT.FP', 'BDM.BTC.BUSD.FP', 'BDM.ETH.USDT.FP', 'BDM.SOL.USDT.FP', 'BDM.XRP.USDT.FP']
+    freqs = ['50ms', '1s']
     ret_n_s = [30]
 
     #########################################################
     #DataMgr
     #########################################################
-    data_mgr = DataMgr(sdate, edate, freq, '/home/bb/data/BDM', instrs = ['BDM.BTC.USDT.FP'], ret_n_s = [30])
-    df_res = data_mgr.get(instr)
-    df2t2 = Df2T2(df_res, M = 3, xcols = ['buy_qty_sum', 'sell_qty_sum'], ycol = 'mid_last_ret_30_n',
-                  wcol = 'wgt_mid_last_ret_30_n', mul = 2, dtype = torch.float32, device='cpu')
-
-    x = df2t2[0]
+    # data_mgr = DataMgr(sdate, edate, freq, '/home/bb/data/BDM', instrs = instrs, ret_n_s = ret_n_s)
+    # df_res = data_mgr.get(instr)
+    # df2t2 = Df2T2(df_res, M = 3, xcols = ['buy_qty_sum', 'sell_qty_sum'], ycol = 'mid_last_ret_30_n',
+    #               wcol = 'wgt_mid_last_ret_30_n', mul = 2, dtype = torch.float32, device='cpu')
+    #
+    # x = df2t2[0]
 
     #########################################################
     # loading
     #########################################################
-    #df_res = read_sampled_df(sdate, edate, freq, '/home/bb/data/BDM', instr = 'BDM.BTC.USDT.FP')
+    #df_res = read_sampled_df(sdate, edate, freq, '/home/bb/data/BDM', instr = instrs)
+
 
     #########################################################
     # saving
     #########################################################
-    # f_save_sampled_df = partial(save_sampled_df,
-    #                           freq = '1s', data_root_dir = '/home/bb/data/BDM', instr = 'BDM.BTC.USDT.FP')
-    #
-    # date_list = [str(e.date()) for e in pd.date_range(sdate, edate)]
-    #
-    # with ProcessPoolExecutor(16) as executor:
-    #     executor.map(f_save_sampled_df, date_list)
+    for freq, instr in cartesian_product(freqs, instrs):
+        print(f'resampling for {instr} @ {freq}')
+        date_list = [str(e.date()) for e in pd.date_range(sdate, edate)]
+
+        f_save_sampled_df = partial(save_sampled_df,
+                                  freq = freq, data_root_dir = '/home/bb/data/BDM', instr = instr)
+
+        #f_save_sampled_df(date_list[0])
+        with ProcessPoolExecutor(12) as executor:
+            executor.map(f_save_sampled_df, date_list)
+
+    exit(0)

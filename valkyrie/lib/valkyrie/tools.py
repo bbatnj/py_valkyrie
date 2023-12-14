@@ -103,6 +103,10 @@ def df_col2str(df):
       df[c] = df[c].astype(str)
   return df
 
+def drop_dup_col_(df):
+  duplicate_cols = df.columns[df.columns.duplicated()]
+  df.drop(columns=duplicate_cols, inplace=True)
+
 def printMkt(obj):
   return f"{obj.bz:.0f}x{obj.bp}-{obj.ap}x{obj.az:.0f}"
 

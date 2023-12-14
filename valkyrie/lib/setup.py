@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 #from ibapi import get_version_string
 
 import sys
@@ -8,8 +8,8 @@ if sys.version_info < (3,1):
 
 setup(
     name='valkyrie',
-    version="1.0.0",
-    packages=['valkyrie'],
+    version="0.0.1",
+    packages=find_packages(),
     url='',
     license='',
     author='bb',

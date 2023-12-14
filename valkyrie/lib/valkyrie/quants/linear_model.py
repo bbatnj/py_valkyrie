@@ -5,6 +5,10 @@ from sklearn.linear_model import LinearRegression as LR
 from valkyrie.securities import *
 from valkyrie.quants.utils import add_clip2col
 
+from sklearn.linear_model import SGDRegressor as SGDReg
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+
 def wcorr(df, xcols: list, ycols: list, wcols: list = None):
   wcoeff = {}
   if wcols and len(ycols) != len(wcols):
@@ -124,3 +128,69 @@ def analyze_features(df, exclude_features, xcols, ycols, wcols):
       res[ef] = lm_fit(df, [ef], ycols, wcols).loc['r2'] #r2 from ef alone
   res = pd.DataFrame(res)
   return res
+
+
+from sklearn.cross_decomposition import PLSRegression as PLS
+
+class PCR:
+  def __init__(self, k_size):
+      self.pls = PLS(k_size)
+
+  def fit(self, X, y, w = None):
+      return self.pls.fit(X, y)
+
+  def predict(self, X):
+      return self.pls.predict(X).reshape(-1)
+
+  def score(self, X, y, w = None):
+      return self.pls.score(X, y)
+
+  def get_params(self):
+      # X -= self._x_mean
+      # X /= self._x_std
+      # Ypred = np.dot(X, self.coef_)
+      pls = self.pls
+      x_coef = (1 / pls._x_std) * pls.coef_.reshape(-1)
+      x_bias = (pls._x_mean / pls._x_std).dot(pls.coef_.reshape(-1))
+      offset = -x_bias + pls._y_mean
+      return {'coeff': x_coef, 'offset': offset}
+
+
+  class SGD:
+    def __init__(self, alpha, l1_ratio):
+        self.scaler = StandardScaler(with_mean=False)
+        a, l1_ratio = float(alpha), float(l1_ratio)
+        self.sgd_reg = SGDReg(loss='epsilon_insensitive',  # 'squared_error',
+                              # epsilon = 1e-6,
+                              penalty='elasticnet',  # None,
+                              fit_intercept=False,
+                              alpha=a,
+                              l1_ratio=l1_ratio,
+                              # tol = 1e-9,
+                              # eta0 = 1e-11,
+                              learning_rate='adaptive')
+        self.pipeline = make_pipeline(self.scaler, self.sgd_reg)
+
+    def fit(self, X, y, w=None):
+        X_scaled = self.scaler.fit_transform(X, y)
+        self.sgd_reg.fit(X_scaled, y, sample_weight = w)
+
+    def predict(self, X):
+        y = self.pipeline.predict(X)
+        return y
+
+    def score(self, X, y, w=None):
+        res = self.pipeline.score(X, y, sample_weight = w)
+        return res
+
+    def get_params(self):
+        return self.sgd_reg.coef_ / self.scaler.scale_
+
+    def get_reg_params(self):
+        return self.sgd_reg.coef_
+
+    def get_scalers(self):
+        return self.scaler.scale_
+
+
+

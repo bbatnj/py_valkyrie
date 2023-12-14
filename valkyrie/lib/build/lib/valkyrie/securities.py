@@ -4,11 +4,11 @@ from collections import defaultdict as DefaultDict
 import pandas_market_calendars as mcal
 import json
 
-ROOT_PATH = '/home/bb/projects/valkyrie/data'  # 'd:/valkyrie/data'
+
 nyse = mcal.get_calendar('NYSE')
 
 def secfromjson(fn):
-  with open(f'{ROOT_PATH}/universe/trading_config_test.json') as f:
+  with open(f'{ROOT_DIR}/universe/trading_config_test.json') as f:
     config = json.load(f)
 
   return list(config['universe'].keys())

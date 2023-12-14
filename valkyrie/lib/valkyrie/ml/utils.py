@@ -71,7 +71,7 @@ abs = torch.abs
 eye = torch.eye
 sigmoid = torch.sigmoid
 batch_matmul = torch.bmm
-numpy = lambda x, *args, **kwargs: x.detach().numpy(*args, **kwargs)
+to_numpy = lambda x, *args, **kwargs: x.detach().numpy(*args, **kwargs)
 size = lambda x, *args, **kwargs: x.numel(*args, **kwargs)
 reshape = lambda x, *args, **kwargs: x.reshape(*args, **kwargs)
 to = lambda x, *args, **kwargs: x.to(*args, **kwargs)
@@ -283,54 +283,17 @@ class ProgressBoard(HyperParameters):
         display.clear_output(wait=True)
         self.counter += 1
 
-class Module(nn_Module, HyperParameters):
-    """Defined in :numref:`sec_oo-design`"""
-    def __init__(self, plot_train_per_epoch=2, plot_valid_per_epoch=1):
-        super().__init__()
-        self.save_hyperparameters()
-        self.board = ProgressBoard()
-    def loss(self, y_hat, y):
-        raise NotImplementedError
 
-    def forward(self, X):
-        assert hasattr(self, 'net'), 'Neural network is defined'
-        return self.net(X)
+loss = nn.L1Loss(reduction='sum')
 
-    def plot(self, key, value, train):
-        """Plot a point in animation."""
-        assert hasattr(self, 'trainer'), 'Trainer is not inited'
-        self.board.xlabel = 'epoch'
-        #if train:
-        #    x = self.trainer.train_batch_idx / \
-        #        self.trainer.num_train_batches
-            #n = self.trainer.num_train_batches / \
-            #    self.plot_train_per_epoch
-        #else:
-        #    x = self.trainer.epoch + 1
-            #n = self.trainer.num_val_batches / \
-            #    self.plot_valid_per_epoch
-        self.board.draw(self.epoch, numpy(to(value, cpu())),
-                        ('train_' if train else 'val_') + key,
-                        f'epoch = {self.epoch}, lr = {self.lr}',
-                        every_n=1)
-                        #every_n = int(n))
+def weighted_l1_loss(y1, y2, w):
+  return loss(y1, y2)
+  #y1, y2, w = y1.view(-1), y2.view(-1), w.view(-1)
+  #res = torch.sum(w * torch.abs(y1 - y2)) #/ torch.sum(w)
+  #return res
 
-    def training_step(self, batch):
-        l = self.loss(self(*batch[:-1]), batch[-1])
-        #self.plot('loss', l, train=True)
-        return l
-
-    def validation_step(self, batch):
-      pass
-        #l = self.loss(self(*batch[:-1]), batch[-1])
-        #self.plot('loss', l, train=False)
-
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
-        #return torch.optim.SGD(self.net.parameters(), lr=self.lr)
-        #return torch.optim.LBFGS(self.parameters(), lr=self.lr)
-
-    def apply_init(self, inputs, init=None):
-        self.forward(*inputs)
-        if init is not None:
-            self.net.apply(init)
+def weighted_l2_loss(y1, y2, w):
+  y1, y2, w = y1.view(-1), y2.view(-1), w.view(-1)
+  z = y1 - y2
+  z = z * z
+  return torch.sum(w * z) #/ torch.sum(w)
