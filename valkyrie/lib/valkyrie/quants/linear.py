@@ -192,5 +192,63 @@ class PCR:
     def get_scalers(self):
         return self.scaler.scale_
 
+def calc_auto_corr(df, col, lags, freq='1s'):
+    df = df[[col]].resample(freq).last().ffill()
+    for lag in lags:
+        df[f'{col}_{lag}'] = df[col].shift(lag)
+    df_corr = df[[c for c in df if col in c]].corr()
+    df_corr.index = np.array([0.0] + lags)
+    df_corr = df_corr.iloc[1:, :].copy()
+    return df_corr[[col]].copy()
 
 
+def weighted_correlation(series1, series2, weights):
+    if len(series1) != len(series2) or len(series1) != len(weights):
+        raise ValueError("Input Series and weights must have the same length")
+
+    weighted_mean1 = np.average(series1, weights=weights)
+    weighted_mean2 = np.average(series2, weights=weights)
+
+    weighted_cov = np.average((series1 - weighted_mean1) * (series2 - weighted_mean2), weights=weights)
+    weighted_var1 = np.average((series1 - weighted_mean1)**2, weights=weights)
+    weighted_var2 = np.average((series2 - weighted_mean2)**2, weights=weights)
+
+    weighted_corr = weighted_cov / np.sqrt(weighted_var1 * weighted_var2)
+
+    return weighted_corr
+
+
+def calc_corr(df, first_cols, second_cols):
+    correlations = []
+
+    for col1 in first_cols:
+        row = []
+        for col2 in second_cols:
+            correlation = df[col1].corr(df[col2])
+            row.append(correlation)
+        correlations.append(row)
+
+    correlation_df = pd.DataFrame(correlations, index=first_cols, columns=second_cols)
+
+    return correlation_df
+
+
+def calculate_weighted_correlations(df, first_cols, second_cols, weight_col):
+    correlations = []
+
+    for col1 in first_cols:
+        row = []
+        for col2 in second_cols:
+            correlation = np.corrcoef(df[col1], df[col2], aweights=df[weight_col])[0, 1]
+            row.append(correlation)
+        correlations.append(row)
+
+    correlation_df = pd.DataFrame(correlations, index=first_cols, columns=second_cols)
+
+    return correlation_df
+
+#exp weighted beta of col_x vs col_y
+def calc_exp_weighted_beta(df, col_x, col_y, beta_hl):
+    xtx = df.eval(f'{col_x} * {col_x}').ewm(halflife=beta_hl).mean()
+    xty = df.eval(f'{col_x} * {col_y}').ewm(halflife=beta_hl).mean()
+    return xty / xtx
