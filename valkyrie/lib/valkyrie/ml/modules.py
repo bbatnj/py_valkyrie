@@ -1,3 +1,5 @@
+from valkyrie.tools import format_df_nums
+
 DATA_HUB = dict()
 DATA_URL = 'http://d2l-data.s3-accelerate.amazonaws.com/'
 
@@ -57,6 +59,7 @@ class NetEvaluator:
         self.Y, self.Y_hat = [], []
         loss, init_loss = 0.0, 0.0
         dl = self.dm.get_dataloader(is_train)
+        n = 0
         for i, batch in enumerate(dl):
             Y = batch[1][:,0].to(self.device)
             with torch.no_grad():
@@ -65,11 +68,12 @@ class NetEvaluator:
                 init_loss += Y.abs().sum()
             self.Y.append(Y)
             self.Y_hat.append(Y_hat)
+            n += batch[0].shape[0]
         score = 1.0 - loss/init_loss
-        return score, loss, init_loss
+        return score, loss / n, init_loss /n
 
 class Trainer(HyperParameters):
-  def __init__(self, max_epochs, log_fn, gpu_index = 0, gradient_clip_val=0):
+  def __init__(self, max_epochs, log_fn, gpu_index = 0, plot = True, gradient_clip_val=0):
     self.save_hyperparameters()
     os.system('mkdir -p ./trainer_logs/')
     self.log_fn = f'./trainer_logs/{log_fn}'
@@ -78,6 +82,7 @@ class Trainer(HyperParameters):
     self.gpu_index = gpu_index
     num_gpus = {len(self.gpus)}
     self.write_log(f'num_gpus = {num_gpus}')
+    self.shall_plot = plot
 
     assert num_gpus != 0, 'No GPU support yet'
 
@@ -92,6 +97,8 @@ class Trainer(HyperParameters):
     self.num_train_batches = len(self.train_dataloader)
     self.num_val_batches   = (len(self.val_dataloader)
                             if self.val_dataloader is not None else 0)
+
+
     self.loss_total = []
 
   def prepare_model(self, model):
@@ -105,10 +112,8 @@ class Trainer(HyperParameters):
 
     self.net_evaluator = NetEvaluator(self.model, data)
 
-    _, _, self.init_train_loss_total = self.net_evaluator.eval_performance(True)
-    _, _, self.init_val_loss_total = self.net_evaluator.eval_performance(False)
-
-
+    _, _, self.init_train_ps = self.net_evaluator.eval_performance(True)
+    _, _, self.init_val_ps = self.net_evaluator.eval_performance(False)
 
     self.optim = model.configure_optimizers()
     self.scheduler = ReduceLROnPlateau(self.optim, mode='min', factor=0.2, patience=5)
@@ -150,7 +155,7 @@ class Trainer(HyperParameters):
     self.model.lr = self.lr
 
     if not torch.isfinite(epoch_loss):
-     raise Exception(f"epoch loss is not finite {epoch_loss}")
+      raise Exception(f"epoch loss is not finite {epoch_loss}")
 
     if self.val_dataloader is None:
       return
@@ -165,23 +170,24 @@ class Trainer(HyperParameters):
       self.val_batch_idx += 1
       n_val_samples += XYW[0].shape[0]
 
-    init_train_loss_ps = self.init_train_loss_total / n_train_samples
-    init_val_loss_ps = self.init_val_loss_total / n_val_samples
+    init_train_loss_ps = self.init_train_ps
+    init_val_loss_ps = self.init_val_ps
     train_loss_ps = epoch_loss / n_train_samples
     val_loss_ps = val_loss / n_val_samples
-    self.model.plot('loss', train_loss_ps, train=True)
-    self.model.plot('loss', val_loss_ps, train=False)
+    if self.shall_plot:
+        self.model.plot('loss', train_loss_ps, train=True)
+        self.model.plot('loss', val_loss_ps, train=False)
 
-
-    res  = pd.Series({f"train score " : f'{float(1 - train_loss_ps/init_train_loss_ps):3g}',
-                   f"init train loss" : f'{float(init_train_loss_ps):3g}',
-                   f"train loss" : f'{float(train_loss_ps):3g}',
-                   f"val score" : f'{float(1 - val_loss_ps/init_val_loss_ps):3g}',
-                   f"init val loss" : f'{float(init_val_loss_ps):3g}',
+    res  = pd.Series(
+                  {f"train_score " : f'{float(1 - train_loss_ps/init_train_loss_ps):3g}',
+                   f"init_train_loss" : f'{float(init_train_loss_ps):3g}',
+                   f"train_loss" : f'{float(train_loss_ps):3g}',
+                   f"val_score" : f'{float(1 - val_loss_ps/init_val_loss_ps):3g}',
+                   f"init_val_loss" : f'{float(init_val_loss_ps):3g}',
                    f"val loss" : f"{float(val_loss_ps):3g}",
                    f"lr" : f"{self.lr:3g}"})
 
-    res = pd.DataFrame(res).T
+    res = format_df_nums(pd.DataFrame(res).T)
 
     self.write_log(f"====== {now} done for epoch:\n{res}")
 

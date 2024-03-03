@@ -14,8 +14,8 @@ from sklearn.linear_model import LinearRegression as LR
 from sklearn.cross_decomposition import PLSRegression as PLSR
 from statsmodels.stats.weightstats import DescrStatsW
 from IPython.core.display import display, HTML
+
 display(HTML("<style>.container { width:100% !important; }</style>"))
-#%matplotlib notebook
 pd.set_option('display.max_rows', 500)
 
 #################################
@@ -31,7 +31,7 @@ from torch.nn import LeakyReLU as LReLU
 #valkyrie common
 #############################
 from valkyrie.securities import stocks_good_dvd, parent
-from valkyrie.quants.linear_model import lm_fit, wcorr, analyze_features
+from valkyrie.quants.linear import lm_fit, wcorr, analyze_features
 #from valkyrie.quants.feature_analyzer import FeatureMgr
 from valkyrie.tools import *
 from valkyrie.components.trade_summary import GroupSimViewer
@@ -45,7 +45,7 @@ import valkyrie.ml.utils as ml_utils
 from valkyrie.ml.data import mrf_linear_fit
 from valkyrie.ml.modules import NetEvaluator
 from valkyrie.ml.utils import tensor, HyperParameters
-from valkyrie.ml.data import Df2T2, SubDataSet
+from valkyrie.ml.data import Df2T2, TrainValDataSet
 from valkyrie.ml.net import LrNet, AlexRegNet
 from valkyrie.ml.data import DataModule
 

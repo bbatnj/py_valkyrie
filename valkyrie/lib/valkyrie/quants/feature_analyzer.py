@@ -10,6 +10,7 @@ from valkyrie.quants.linear_model import WinsorizedLM
 from valkyrie.securities import stocks_good_dvd, nyse, ymd_dir
 from valkyrie.tools import ymd, SIM_ROOT_DIR, toDf32_
 
+
 class FeatureMgr:
   def __init__(self, sdate, edate, stocks, sim,
                root_dir=SIM_ROOT_DIR):

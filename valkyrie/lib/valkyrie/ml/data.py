@@ -318,14 +318,14 @@ def create_random_sets_numpy(N, p):
 
     return first_set, second_set
 
-class SubDataSet(Dataset):
+class TrainValDataSet(Dataset):
 
     @staticmethod
     def create_train_valiation_pair(parent_data_set, train_percentage):
         n = len(parent_data_set)
         train_indices, validation_indices = create_random_sets_numpy(n, train_percentage)
-        train_set = SubDataSet(parent_data_set, train_indices)
-        validation_set = SubDataSet(parent_data_set, validation_indices)
+        train_set = TrainValDataSet(parent_data_set, train_indices)
+        validation_set = TrainValDataSet(parent_data_set, validation_indices)
         return train_set, validation_set
 
     def __init__(self, parent_dataset, indices):

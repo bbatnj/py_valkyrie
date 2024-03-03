@@ -138,12 +138,13 @@ if __name__ == "__main__":
     from functools import partial
     sdate, edate = '2023-01-01', '2023-11-30'
     instrs = ['BDM.BTC.USDT.FP', 'BDM.BTC.BUSD.FP', 'BDM.ETH.USDT.FP', 'BDM.SOL.USDT.FP', 'BDM.XRP.USDT.FP']
-    freqs = ['50ms', '1s']
-    ret_n_s = [30]
+    freqs = ['100ms']#['50ms', '1s']
+
 
     #########################################################
     #DataMgr
     #########################################################
+    # ret_n_s = [30]
     # data_mgr = DataMgr(sdate, edate, freq, '/home/bb/data/BDM', instrs = instrs, ret_n_s = ret_n_s)
     # df_res = data_mgr.get(instr)
     # df2t2 = Df2T2(df_res, M = 3, xcols = ['buy_qty_sum', 'sell_qty_sum'], ycol = 'mid_last_ret_30_n',
@@ -167,8 +168,8 @@ if __name__ == "__main__":
         f_save_sampled_df = partial(save_sampled_df,
                                   freq = freq, data_root_dir = '/home/bb/data/BDM', instr = instr)
 
-        #f_save_sampled_df(date_list[0])
-        with ProcessPoolExecutor(12) as executor:
-            executor.map(f_save_sampled_df, date_list)
+        f_save_sampled_df(date_list[0])
+        #with ProcessPoolExecutor(6) as executor:
+        #    executor.map(f_save_sampled_df, date_list)
 
     exit(0)

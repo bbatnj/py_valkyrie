@@ -5,14 +5,17 @@ import copy
 import os
 from timeit import default_timer as timer
 
-import cProfile
-import pstats
-from functools import wraps
-
+from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import logging
 import socket
+
+
+import cProfile
+import pstats
+from functools import wraps
+
 
 
 HOSTNAME = socket.gethostname()
@@ -112,7 +115,26 @@ def printMkt(obj):
 
 T0 = pd.Timestamp(0, tz='US/Eastern')
 
-def human_format(num):
+def format_df_nums(df, cols_with_comma = []):
+    df = df.copy()
+    for c, t in df.dtypes.items():
+        if np.issubdtype(t, np.number):
+            if c in cols_with_comma:
+                df[c] = df[c].apply(lambda x : f'${x:,.2f}')
+            else:
+                df[c] = df[c].apply(lambda x : f'{x:.4g}')
+    return df
+
+def df_des(df):
+    return df.describe(percentiles=[0.5, 0.75, 0.9, 0.95, 0.99, 0.995])
+
+def str2sec(s):
+    try:
+        return pd.Timedelta(s).total_seconds()
+    except:
+        raise Exception(f'invalid time format {s}')
+
+def format2kmgt(num):
     magnitude = 0
     while abs(num) >= 1000:
         magnitude += 1
@@ -121,7 +143,7 @@ def human_format(num):
 
 def print_df_mem_usage(df : pd.DataFrame):
       x = df.memory_usage().sum()
-      print(f'{human_format(x)}B')
+      print(f'{format2kmgt(x)}B')
 
 def toDf32_(df):
   for c, kind in df.dtypes.items():
@@ -159,6 +181,85 @@ class ConfigGenerator:
       cur_p2p = dict(zip(patterns, param))
       with open(f'{dst_dir}/{tpl_name}_{i + 1 :04d}'.replace('.tpl','') + '.json', 'w') as file:
         file.writelines([self.multi_replace(self.text, cur_p2p)])
+
+def plot_multiple_lines(df, y_axis, t1=None, t2=None):
+    if len(y_axis) > 4:
+        raise Exception(f'Max 4 y_axis supported, given {len(y_axis)}')
+
+    y1_label, y2_label, y3_label, y4_label = '', '', '', ''
+    y1_cols, y2_cols, y3_cols, y4_cols = [], [], [], []
+
+    for i, e in enumerate(list(y_axis.items())):
+        label, cols = e[0], e[1]
+        if i == 0:
+            y1_label = label
+            y1_cols = cols.copy()
+        elif i == 1:
+            y2_label = label
+            y2_cols = cols.copy()
+        elif i == 2:
+            y3_label = label
+            y3_cols = cols.copy()
+        elif i == 3:
+            y4_label = label
+            y4_cols = cols.copy()
+
+    if t1 or t2:
+        df = df.between_time(t1, t2).copy()
+
+    transparent = 0.5
+    cmap = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+    fig.subplots_adjust(right=0.8)
+
+    lines = []
+
+    for i, col in enumerate(y1_cols):
+        line_i1 = ax1.plot(df[col], c=cmap[i], label=col, alpha=transparent)
+        lines += line_i1
+
+    ax1.set_xlabel("Time")
+    ax1.set_ylabel(y1_label, fontsize=20)
+    ax1.yaxis.label.set_color(lines[-1].get_color())
+    ax1.tick_params(axis="x")
+    ax1.tick_params(axis="y", colors=lines[-1].get_color())
+    ax1.grid(True, axis="both", which="both")
+
+    if y2_cols:
+        ax2 = ax1.twinx()
+        for i2, col in enumerate(y2_cols, len(y1_cols)):
+            line_i2 = ax2.plot(df[col], c=cmap[i2], label=col, alpha=transparent)
+            lines += line_i2
+        ax2.set_ylabel(y2_label)
+        ax2.yaxis.label.set_color(lines[-1].get_color())
+        ax2.tick_params(axis="both", colors=lines[-1].get_color())
+
+    if y3_cols:
+        ax3 = ax1.twinx()
+        ax3.spines['right'].set_position(('outward', 60))
+        for i3, col in enumerate(y3_cols, len(y1_cols) + len(y2_cols)):
+            line_i3 = ax3.plot(df[col], c=cmap[i3], label=col, alpha=transparent)
+            lines += line_i3
+        ax3.set_ylabel(y3_label)
+        ax3.yaxis.label.set_color(lines[-1].get_color())
+        ax3.tick_params(axis="both", colors=lines[-1].get_color())
+
+    if y4_cols:
+        ax4 = ax1.twinx()
+        ax4.spines['right'].set_position(('outward', 120))
+        for i4, col in enumerate(y4_cols, len(y1_cols) + len(y2_cols) + len(y3_cols)):
+            line_i4 = ax4.plot(df[col], '-', c=cmap[i4], label=col)
+            lines += line_i4
+        ax4.set_ylabel(y4_label)
+        ax4.yaxis.label.set_color(lines[-1].get_color())
+        ax4.tick_params(axis="both", colors=lines[-1].get_color())
+
+    labs = [l.get_label() for l in lines]
+    plt.legend(lines, labs, loc="lower left")
+    plt.close(fig)
+    return fig
+
+
 
 def profile(output_file=None, sort_by='cumulative', lines_to_print=None, strip_dirs=False):
   """A time profiler decorator.

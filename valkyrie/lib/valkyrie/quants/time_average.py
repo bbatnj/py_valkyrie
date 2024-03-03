@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 
 import pandas as pd
 import numpy as np
+from numba import jit
 from sklearn.linear_model import LinearRegression as LR
 
 from sklearn.model_selection import ParameterGrid
@@ -16,10 +17,9 @@ from sklearn.model_selection import TimeSeriesSplit
 
 from valkyrie.securities import *
 from valkyrie.tools import ymd, ymd_dir, calc_diff_days, cpum2
-from valkyrie.quants.linear_model import WinsorizedLM
+from valkyrie.quants.linear import WinsorizedLM
 
 EPS = 1e-5
-
 
 class Kalman1D:
   def __init__(self, mult : float, min_s2 : float, vol: float):
@@ -83,7 +83,6 @@ class EMS:
   def getData(self):
     return self.x_h
 
-
 class EMA:
   def __init__(self, halflife, init_value = np.nan):
     self.halflife, self.x_h, self.t = halflife, init_value, T0
@@ -106,7 +105,6 @@ class EMA:
 
   def getData(self):
     return self.x_h
-
 
 def add_wema(df, halflife_in_n, col, s2_col, min_s2=0.01 ** 2, y_col='y'):
   eta = np.exp(-1.0 / halflife_in_n)
@@ -137,13 +135,11 @@ def add_wema(df, halflife_in_n, col, s2_col, min_s2=0.01 ** 2, y_col='y'):
   df['sigma2_hat'] = sigma2_hat
   df[y_col] = y
 
-
 def calc_wemas(df, ema_mults, col, s2_col, min_s2=0.01 ** 2, ycol='y'):
   df = df.copy()
   for ema in ema_mults:
     add_wema(df, ema, col, s2_col, min_s2, y_col=f'{ycol}_{ema}')
   return df
-
 
 class BuilderXY(ABC):
   def __init__(self, name):
@@ -155,7 +151,6 @@ class BuilderXY(ABC):
 
   def __str__(self):
     return self.name
-
 
 
 def fit_tscv(xy_builders, models,
@@ -253,8 +248,6 @@ def fit_tscv(xy_builders, models,
   df_res = pd.DataFrame(res)
   return df_res, param2res
 
-
-
 ########################################################################
 ########################################################################
 ########################################################################
@@ -275,85 +268,16 @@ def create_stk_xy_builders(stocks, xy_builder_classes, xy_params, black_list={'P
   return xy_builders
 
 
-def calc_current_yield(df, dvd_freq, dvd_path='d:/valkyrie/data/universe/dvd/research_20220205', ):
-  freq2param = {
-    'Q': {'n_per_year': 4, 'n_days': 90},
-    'M': {'n_per_year': 12, 'n_days': 30}
-  }
-  # copy md df
-  df_md = df.copy()
-  df_md['ymd'] = df_md.index.map(lambda x: ymd(x))
-  stocks = df_md['ticker'].unique()
-
-  # create dvd df, last dvd on/before date
-  df_dvd = []
-  for stk in stocks:
-    try:
-      df = pd.read_csv(f'{dvd_path}/{stk}.csv').sort_values('date')
-      df['ymd'] = df['date'].apply(ymd)
-      if df.shape[0] <= 1:
-        raise Exception(f'Not enough dvd history for {stk} number of records = {df.shape[0]} ')
-
-      df['ticker'] = stk
-      df = df.iloc[1:].copy()  # remove the first one
-      df_dvd.append(df)
-    except Exception as e:
-      print(e)
-
-  df_dvd = pd.concat(df_dvd)
-  df_dvd = df_dvd.rename({'date': 'exDate'}, axis=1).drop(['note', 'ymd'], axis=1)
-  df_dvd.index = df_dvd['exDate'].apply(lambda t: pd.Timestamp(t))
-  df_dvd.index.name = ''
-  df_dvd = df_dvd.sort_values(['ticker', 'exDate'])
-
-  # filter tickers witout dvd info
-  stocks_with_dvd = set(df_dvd['ticker'])
-  removed_stocks = {s for s in stocks if s not in stocks_with_dvd}
-  stocks = stocks_with_dvd.intersection(stocks)
-  df_md = df_md.query('ticker in @stocks').copy()
-  if len(removed_stocks) > 0:
-    print(f'removed stocks {removed_stocks} due to no dvd info')
-
-  # merge with dvd and calc yield
-  df_merged = pd.merge_asof(df_md, df_dvd.sort_index(), left_index=True, right_index=True, by='ticker')
-  df_merged['dExDate'] = calc_diff_days(df_merged, 'ymd', 'exDate')
-  n_days = freq2param[dvd_freq]['n_days']
-  df_merged['accrued'] = df_merged.eval('dExDate/@n_days * amount')
-  df_merged['ymd'] = df_merged.index.map(ymd)
-  # df_merged['accrued'] = df_merged[['accrued', 'amount']].min(axis=1)
-
-  # add extra dvd adj
-  df_merged['adj'] = 0.0
-  df_extra = pd.read_csv(f'{dvd_path}/extra.csv')
-  df_extra['sdate'] = df_extra['sdate'].apply(ymd)
-  df_extra['edate'] = df_extra['edate'].apply(ymd)
-  extra_adj_records = df_extra.to_dict('records')
-  for rec in extra_adj_records:
-    t, s, e, m = rec['ticker'], rec['sdate'], rec['edate'], rec['amount']
-    df_merged['active'] = df_merged.eval('@s <= ymd <= @e and ticker == @t').astype(int)
-    df_merged['adj'] += df_merged.eval('active * @m')
-
-  df_merged['upx'] = df_merged.eval('(bid * az + ask * bz) / (bz + az)')
-  n_per_year = freq2param[dvd_freq]['n_per_year']
-  df_merged['cy_upx'] = df_merged.eval(' @n_per_year * amount / (upx - accrued + adj)')
-  df_merged['cy_bid'] = df_merged.eval(' @n_per_year * amount / (bid - accrued + adj)')
-  df_merged['cy_ask'] = df_merged.eval(' @n_per_year * amount / (ask - accrued + adj)')
-
-  df_dvd_err = df_merged.groupby(['ymd', 'ticker'])[['dExDate']].first().query('dExDate > 105')
-  if df_dvd_err.shape[0] > 0:
-    print(f'possible dvd error :')
-    print(df_dvd_err)
-
-  return df_merged
-from numba import jit
-import numpy as np
-
 @jit
 def calc_ts_ema(x, dt, halflife_in_s):
     eta = np.exp(-1.0 * dt / halflife_in_s)
     eta = np.clip(eta, 0, np.inf)
+    if np.isscalar(eta):
+      eta = np.full_like(x, eta)
+
     ome = 1.0 - eta
-    n, y = x.shape[0], x.copy()
+    n, y = x.shape[0], np.empty_like(x)
+    y[0] = x[0]
 
     for i in np.arange(1, n):
         if not np.isfinite(x[i]):
@@ -367,7 +291,11 @@ def calc_ts_ema(x, dt, halflife_in_s):
 def calc_ts_ems(x, dt, halflife_in_s):
     eta = np.exp(-1.0 * dt / halflife_in_s)
     eta = np.clip(eta, 0, np.inf)
-    n, y = x.shape[0], x.copy()
+    if np.isscalar(eta):
+      eta = np.full_like(x, eta)
+
+    n, y = x.shape[0], np.empty_like(x)
+    y[0] = x[0]
 
     for i in np.arange(1, n):
         if not np.isfinite(x[i]):
@@ -376,6 +304,41 @@ def calc_ts_ems(x, dt, halflife_in_s):
 
         y[i] = y[i - 1] * eta[i] + x[i]
     return y
+
+def calc_ems_hl(df, fld, freq_sec, hl_sec_s =  [10, 60, 300, 1800]):
+    if not np.issubdtype(type(freq_sec), np.number):
+        freq_sec = str2sec(freq_sec)
+
+    df = df[[fld]].ffill().fillna(0.0)
+    for hl in hl_sec_s :
+        df[f'net_qty_ems_{hl}'] = calc_ts_ems(df[fld].values, freq_sec, hl)
+    return df[[c for c in df if 'net_qty_ems' in c]]
+
+
+def calc_ema_hl(df, fld, freq_sec, hl_sec_s =  [10, 60, 300, 1800]):
+    if not np.issubdtype(type(freq_sec), np.number):
+        freq_sec = str2sec(freq_sec)
+
+    df = df[[fld]].ffill().fillna(0.0)
+    for hl in hl_sec_s :
+        df[f'net_qty_ems_{hl}'] = calc_ts_ema(df[fld].values, freq_sec, hl)
+    return df[[c for c in df if 'net_qty_ems' in c]]
+
+def calc_ema_vol(df_mid, mid_fld, freq_sec, hl_sec_s = [10, 60, 300, 1800], max_vol = np.inf):
+    if not np.issubdtype(type(freq_sec), np.number):
+        freq_sec = str2sec(freq_sec)
+
+    df_vol = df_mid[[mid_fld]].copy()
+    n_samples_per_year = 365 * 24 * 3600 / freq_sec
+    max_ret = max_vol / np.sqrt(n_samples_per_year) * 10.0
+    df_vol['var_raw'] = (df_vol[mid_fld].shift(-1) / df_vol[mid_fld]).apply(np.log).clip(-max_ret, max_ret)
+    df_vol['var_raw'] = df_vol['var_raw'].apply(np.square)
+    df_vol['vol_raw'] = df_vol['var_raw'].apply(np.sqrt) * np.sqrt(n_samples_per_year)
+    for hl in hl_sec_s:
+        #df_vol[f'vol_{hl}']=df_vol[['var_raw']].rolling(hl).mean() #calc_ts_ema(df_vol['var_raw'].values, df_vol['dt'].values, hl)
+        df_vol[f'vol_{hl}'] = calc_ts_ema(df_vol['var_raw'].values, freq_sec, hl)
+        df_vol[f'vol_{hl}'] = df_vol[f'vol_{hl}'].apply(lambda var : np.sqrt(var * n_samples_per_year ) )
+    return df_vol[[c for c in df_vol if 'vol_' in c or 'var_raw' in c or 'vol_raw' in c]]
 
 
 # class DataMgrCYieldEma(DataMgr):

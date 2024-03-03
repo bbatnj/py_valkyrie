@@ -192,15 +192,20 @@ class PCR:
     def get_scalers(self):
         return self.scaler.scale_
 
-def calc_auto_corr(df, col, lags, freq='1s'):
-    df = df[[col]].resample(freq).last().ffill()
-    for lag in lags:
-        df[f'{col}_{lag}'] = df[col].shift(lag)
-    df_corr = df[[c for c in df if col in c]].corr()
-    df_corr.index = np.array([0.0] + lags)
-    df_corr = df_corr.iloc[1:, :].copy()
-    return df_corr[[col]].copy()
+def calc_auto_corr(df, cols, lags):
+    if type(cols) is str:
+        cols = [cols]
 
+    df_res = []
+
+    for col in cols:
+        for lag in lags:
+            df[f'{col}_{lag}'] = df[col].shift(lag)
+        df_corr = df[[c for c in df if col in c]].corr()
+        df_corr.index = np.array([0.0] + lags)
+        df_corr = df_corr.iloc[1:, :].copy()
+        df_res.append(df_corr)
+    return pd.concat(df_res, axis = 1)
 
 def weighted_correlation(series1, series2, weights):
     if len(series1) != len(series2) or len(series1) != len(weights):
